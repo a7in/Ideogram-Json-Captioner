@@ -42,6 +42,26 @@ class StoreTests(unittest.TestCase):
             self.assertIn("Imported plain text", message)
             self.assertEqual(caption["high_level_description"], "a concise plain caption")
 
+    def test_missing_caption_loads_blank_and_saves_new_json(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            image = folder / "sample.jpg"
+            image.write_bytes(b"x")
+            store = CaptionStore(folder, ".json")
+
+            caption, message = store.load_caption(image)
+            self.assertIn("click Save to create it", message)
+            self.assertEqual(caption["high_level_description"], "")
+
+            caption["high_level_description"] = "A new caption"
+            saved_path = store.save_caption(image, caption)
+
+            self.assertEqual(saved_path, folder / "sample.json")
+            saved = json.loads(saved_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["high_level_description"], "A new caption")
+            self.assertIn("style_description", saved)
+            self.assertIn("compositional_deconstruction", saved)
+
     def test_edit_folder_is_not_listed_as_source_images(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)

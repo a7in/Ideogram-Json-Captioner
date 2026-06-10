@@ -50,6 +50,10 @@ Caption files are matched by image stem. For `photo_001.png`, the app reads and
 writes `photo_001.json`, `photo_001.txt`, or `photo_001.caption` depending on
 the selected caption-file extension.
 
+Images are listed even when they do not have caption files yet. A missing
+structured caption opens as a blank Ideogram caption, and saving creates a new
+file with the selected caption extension.
+
 The separate `Original files` dropdown lets you load and edit plain source
 captions such as `photo_001.txt` or `photo_001.original` while keeping the main
 structured caption output separate. If the original extension would point at the
