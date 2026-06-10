@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+from .schema import IMAGE_EXTENSIONS, caption_from_plain_text, default_caption, parse_caption_text, serialize_caption
+
+
+class CaptionStore:
+    def __init__(self, folder: str | Path, extension: str) -> None:
+        self.folder = Path(folder)
+        self.extension = extension
+
+    def images(self) -> list[Path]:
+        if self.folder.name.lower() == "edit":
+            return []
+        return sorted(
+            [path for path in self.folder.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS],
+            key=lambda path: path.name.lower(),
+        )
+
+    def caption_path(self, image_path: Path) -> Path:
+        return image_path.with_suffix(self.extension)
+
+    def load_caption(self, image_path: Path) -> tuple[dict[str, Any], str | None]:
+        caption_path = self.caption_path(image_path)
+        if not caption_path.exists():
+            return default_caption(), f"No {self.extension} caption yet."
+
+        raw = caption_path.read_text(encoding="utf-8-sig")
+        if not raw.strip():
+            return default_caption(), f"{caption_path.name} is empty."
+
+        try:
+            return parse_caption_text(raw), None
+        except (json.JSONDecodeError, ValueError) as exc:
+            if self.extension in {".txt", ".caption"}:
+                return caption_from_plain_text(raw), f"Imported plain text from {caption_path.name}; save will convert it to Ideogram JSON."
+            return default_caption(), f"Could not parse {caption_path.name}: {exc}"
+
+    def save_caption(self, image_path: Path, caption: dict[str, Any]) -> Path:
+        caption_path = self.caption_path(image_path)
+        caption_path.write_text(serialize_caption(caption), encoding="utf-8")
+        return caption_path
