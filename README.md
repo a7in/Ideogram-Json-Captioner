@@ -9,6 +9,8 @@ captions. Auto-captioning sends requests only to the OpenAI-compatible endpoint
 you configure in Preferences, such as a local llama.cpp, LM Studio, vLLM, or
 Ollama-compatible server.
 
+![Ideogram JSON Captioner screenshot](ideogramCaptionerScreenshot.png)
+
 ## Features
 
 - Open a folder of images and step through them with keyboard shortcuts.
@@ -88,7 +90,6 @@ For the local runtime, put `llama-server.exe` in one of these locations:
 - Beside `IdeogramCaptioner.exe` or the source checkout.
 - In a `tools` folder beside the app.
 - Anywhere else selected in Preferences.
-
 
 The app reuses an already-running endpoint when one is available. Use
 `Connect to existing server` for LM Studio, llama.cpp, vLLM, Ollama bridges, or
