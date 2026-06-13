@@ -47,7 +47,7 @@ python run_captioner.py
 
 ## Basic Use
 
-Manual Captioning: 
+### Manual Captioning: 
 1. Open a folder that contains images.
 2. Choose the structured caption extension to edit, usually `.json`.
 3. Choose an original caption extension if you also want to edit source captions,
@@ -55,7 +55,7 @@ Manual Captioning:
 4. Select an image, edit the fields, then use `Save` or `Enter` to save and move
    to the next image.
    
-Automatic Captioning: 
+### Automatic Captioning: 
 If you don't already have an OpenAI-compatible server, the easiest way to get automatic captioning working is to grab llama.cpp from their releases section - https://github.com/ggml-org/llama.cpp/releases - and be sure to grab the CUDA .dlls and put them in the same folder as llama-server.exe if you're using an Nvidia card, otherwise it will probably be quite slow.
 After you've done so, open the preferences and select where you've put llama-server.exe.  From there, just select what image(s) you want to caption and select the appropriate button from the Auto Captioning section.
 
