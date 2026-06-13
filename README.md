@@ -47,23 +47,20 @@ python run_captioner.py
 
 ## Basic Use
 
+Manual Captioning: 
 1. Open a folder that contains images.
 2. Choose the structured caption extension to edit, usually `.json`.
 3. Choose an original caption extension if you also want to edit source captions,
    such as `.txt` or `.original`.
 4. Select an image, edit the fields, then use `Save` or `Enter` to save and move
    to the next image.
+   
+Automatic Captioning: 
+If you don't already have an OpenAI-compatible server, the easiest way to get automatic captioning working is to grab llama.cpp from their releases section - https://github.com/ggml-org/llama.cpp/releases - and be sure to grab the CUDA .dlls and put them in the same folder as llama-server.exe if you're using an Nvidia card, otherwise it will probably be quite slow.
+After you've done so, open the preferences and select where you've put llama-server.exe.  From there, just select what image(s) you want to caption and select the appropriate button from the Auto Captioning section.
 
-When automatically captioning, I would probably recommend doing a regular text caption first (if you don't have one already), and then creating the JSON caption from that, but making them directly can also work.  You will definitely want to alter the prompts sent to the LLM as they've very basic - do a few images as a test to see what you need to specify.
+For automatic captioning, I would probably recommend doing a regular text caption first (if you don't have one already), and then creating the JSON caption from that, but making them directly can also work.  You will definitely want to alter the prompts sent to the LLM as they've very basic - do a few images as a test to see what you need to specify.
 
-For an image named `photo_001.png`, the app looks for sidecar files with the
-same stem, such as `photo_001.json`, `photo_001.txt`, or
-`photo_001.original`. Missing structured captions open as blank Ideogram
-captions and are created when saved.
-
-If the original-caption extension points at the same file as the structured
-caption extension, the original-caption editor is disabled to prevent accidental
-overwrite.
 
 ## Keyboard Shortcuts
 
@@ -91,6 +88,7 @@ For the local runtime, put `llama-server.exe` in one of these locations:
 - Beside `IdeogramCaptioner.exe` or the source checkout.
 - In a `tools` folder beside the app.
 - Anywhere else selected in Preferences.
+
 
 The app reuses an already-running endpoint when one is available. Use
 `Connect to existing server` for LM Studio, llama.cpp, vLLM, Ollama bridges, or
