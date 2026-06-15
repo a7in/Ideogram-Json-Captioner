@@ -1,11 +1,10 @@
 # Ideogram JSON Captioner
 
 A local desktop editor for image-caption pairs in Ideogram 4 structured JSON
-format. Use it to review image datasets, repair generated captions, edit source
-caption text, and draw or adjust object/text bounding boxes.
+format. Use it to generate either regular captions or JSON captions, review image datasets, repair generated captions, edit source
+caption text, and draw or adjust object/text bounding boxes.  You can also generate JSON captions based on your already existing and vetted captions.
 
-The app runs locally by default. Manual editing does not upload images or
-captions. Auto-captioning sends requests only to the OpenAI-compatible endpoint
+The app runs locally by default. . Auto-captioning sends requests only to the OpenAI-compatible endpoint
 you configure in Preferences, such as a local llama.cpp, LM Studio, vLLM, or
 Ollama-compatible server.
 
