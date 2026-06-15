@@ -162,7 +162,21 @@ class ScrollFrame(ttk.Frame):
 
         self.interior.bind("<Configure>", self._on_interior_configure)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self._mousewheel_bound = False
+        self.bind("<Enter>", self._bind_mousewheel)
+        self.bind("<Leave>", self._unbind_mousewheel)
+        self.interior.bind("<Enter>", self._bind_mousewheel)
+        self.interior.bind("<Leave>", self._unbind_mousewheel)
+
+    def _bind_mousewheel(self, _event: tk.Event | None = None) -> None:
+        if not self._mousewheel_bound:
+            self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+            self._mousewheel_bound = True
+
+    def _unbind_mousewheel(self, _event: tk.Event | None = None) -> None:
+        if self._mousewheel_bound:
+            self.canvas.unbind_all("<MouseWheel>")
+            self._mousewheel_bound = False
 
     def _on_interior_configure(self, _event: tk.Event) -> None:
         self._update_scroll_region()
@@ -182,9 +196,25 @@ class ScrollFrame(ttk.Frame):
         self.canvas.configure(scrollregion=(0, 0, right, bottom))
 
     def _on_mousewheel(self, event: tk.Event) -> None:
-        if self.winfo_containing(event.x_root, event.y_root) is None:
-            return
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        try:
+            if not self.winfo_exists() or not self.canvas.winfo_exists():
+                self._unbind_mousewheel()
+                return
+            widget = self.winfo_containing(event.x_root, event.y_root)
+            if widget is None:
+                return
+            current: tk.Widget | None = widget
+            while current is not None:
+                if current == self:
+                    self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    return
+                current = current.master
+        except tk.TclError:
+            self._unbind_mousewheel()
+
+    def destroy(self) -> None:
+        self._unbind_mousewheel()
+        super().destroy()
 
     def scroll_to_top(self) -> None:
         self._update_scroll_region()
