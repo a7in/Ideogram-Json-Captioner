@@ -186,3 +186,12 @@ def parse_caption_text(text: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("Caption JSON must be an object.")
     return normalize_caption(parsed)
+
+
+def has_obj_bbox_annotation(caption: dict[str, Any]) -> bool:
+    """Return True when the caption has at least one obj element with a bbox."""
+    normalized = normalize_caption(caption)
+    elements = normalized.get("compositional_deconstruction", {}).get("elements", [])
+    return any(
+        isinstance(element, dict) and element.get("type") == "obj" and element.get("bbox") for element in elements
+    )
