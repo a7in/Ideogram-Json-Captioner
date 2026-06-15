@@ -116,6 +116,10 @@ IMAGE_SORT_OPTIONS = (
     IMAGE_SORT_BBOX_MISSING,
     IMAGE_SORT_FAILED,
 )
+CAPTION_FILTER_JSON = "JSON caption"
+CAPTION_FILTER_ORIGINAL = "Original caption"
+CAPTION_FILTER_BOTH = "JSON + original"
+CAPTION_FILTER_SCOPES = (CAPTION_FILTER_BOTH, CAPTION_FILTER_JSON, CAPTION_FILTER_ORIGINAL)
 RUNTIME_LOCAL_LABEL = "Local llama.cpp (recommended)"
 RUNTIME_EXISTING_LABEL = "Connect to existing server"
 RUNTIME_CUSTOM_LABEL = "Custom start commands"
@@ -728,10 +732,18 @@ class CaptionEditorApp(tk.Tk):
         self.pending_image_select_job: str | None = None
         self.last_image_click_index: int | None = None
         self.image_selection_anchor_path: Path | None = None
+        self.caption_filter_matches: set[Path] | None = None
+        self.caption_filter_active_query = ""
+        self.caption_filter_active_scope = CAPTION_FILTER_BOTH
+        self.caption_filter_worker: threading.Thread | None = None
+        self.caption_filter_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+        self.caption_filter_generation = 0
 
         self.caption_extension_var = tk.StringVar(value=".json")
         self.original_extension_var = tk.StringVar(value=".txt")
         self.image_sort_var = tk.StringVar(value=IMAGE_SORT_NAME_ASC)
+        self.caption_filter_query_var = tk.StringVar(value="")
+        self.caption_filter_scope_var = tk.StringVar(value=CAPTION_FILTER_BOTH)
         self.status_var = tk.StringVar(value="Open a folder to begin.")
         self.ai_progress_var = tk.DoubleVar(value=0.0)
         self.ai_progress_text_var = tk.StringVar(value="")
@@ -850,7 +862,7 @@ class CaptionEditorApp(tk.Tk):
         self.paned.grid(row=2, column=0, sticky="nsew")
 
         list_frame = ttk.Frame(self.paned, width=180, padding=(10, 10), style="Panel.TFrame")
-        list_frame.rowconfigure(2, weight=1)
+        list_frame.rowconfigure(3, weight=1)
         list_frame.columnconfigure(0, weight=1)
         ttk.Label(list_frame, text="Images", style="Section.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
         sort_frame = ttk.Frame(list_frame)
@@ -865,6 +877,30 @@ class CaptionEditorApp(tk.Tk):
             width=20,
         )
         self.image_sort_combo.grid(row=0, column=1, sticky="ew")
+
+        filter_frame = ttk.Frame(list_frame)
+        filter_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        filter_frame.columnconfigure(0, weight=1)
+        ttk.Label(filter_frame, text="Caption search").grid(row=0, column=0, sticky="w", pady=(0, 3))
+        self.caption_filter_entry = ttk.Entry(filter_frame, textvariable=self.caption_filter_query_var)
+        self.caption_filter_entry.grid(row=1, column=0, sticky="ew", pady=(0, 4))
+        self.caption_filter_scope_combo = ttk.Combobox(
+            filter_frame,
+            textvariable=self.caption_filter_scope_var,
+            values=CAPTION_FILTER_SCOPES,
+            state="readonly",
+            width=20,
+        )
+        self.caption_filter_scope_combo.grid(row=2, column=0, sticky="ew", pady=(0, 4))
+        filter_buttons = ttk.Frame(filter_frame)
+        filter_buttons.grid(row=3, column=0, sticky="ew")
+        filter_buttons.columnconfigure(0, weight=1)
+        filter_buttons.columnconfigure(1, weight=1)
+        ttk.Button(filter_buttons, text="Apply", command=self.apply_caption_filter).grid(
+            row=0, column=0, sticky="ew", padx=(0, 4)
+        )
+        ttk.Button(filter_buttons, text="Clear", command=self.clear_caption_filter).grid(row=0, column=1, sticky="ew")
+
         self.image_list = tk.Listbox(
             list_frame,
             width=24,
@@ -880,8 +916,8 @@ class CaptionEditorApp(tk.Tk):
         )
         image_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=self.image_list.yview)
         self.image_list.configure(yscrollcommand=image_scroll.set)
-        self.image_list.grid(row=2, column=0, sticky="nsew")
-        image_scroll.grid(row=2, column=1, sticky="ns")
+        self.image_list.grid(row=3, column=0, sticky="nsew")
+        image_scroll.grid(row=3, column=1, sticky="ns")
 
         canvas_frame = ttk.Frame(self.paned)
         canvas_frame.rowconfigure(0, weight=1)
@@ -1344,6 +1380,8 @@ class CaptionEditorApp(tk.Tk):
         self.extension_combo.bind("<<ComboboxSelected>>", self.on_caption_extension_changed)
         self.original_extension_combo.bind("<<ComboboxSelected>>", self.on_original_extension_changed)
         self.image_sort_combo.bind("<<ComboboxSelected>>", self.on_image_sort_changed)
+        self.caption_filter_entry.bind("<Return>", lambda _event: self.apply_caption_filter())
+        self.caption_filter_entry.bind("<Escape>", lambda _event: self.clear_caption_filter())
         self.style_mode_var.trace_add("write", lambda *_args: self.on_style_mode_changed())
         self.medium_var.trace_add("write", lambda *_args: self._on_form_change())
         self.element_type_var.trace_add("write", lambda *_args: self.on_element_type_changed())
@@ -1536,6 +1574,57 @@ class CaptionEditorApp(tk.Tk):
         original_path = self.original_path_for_image(image_path)
         return original_path is not None and original_path.exists()
 
+    @staticmethod
+    def caption_filter_paths_for_image(
+        image_path: Path,
+        caption_extension: str,
+        original_extension: str | None,
+        scope: str,
+    ) -> list[Path]:
+        paths: list[Path] = []
+        if scope in {CAPTION_FILTER_JSON, CAPTION_FILTER_BOTH}:
+            paths.append(image_path.with_suffix(caption_extension))
+        if scope in {CAPTION_FILTER_ORIGINAL, CAPTION_FILTER_BOTH} and original_extension is not None:
+            paths.append(image_path.with_suffix(original_extension))
+
+        unique_paths: list[Path] = []
+        seen: set[Path] = set()
+        for path in paths:
+            if path not in seen:
+                unique_paths.append(path)
+                seen.add(path)
+        return unique_paths
+
+    @staticmethod
+    def file_contains_caption_filter_query(path: Path, query_lower: str) -> bool:
+        if not path.exists():
+            return False
+        try:
+            text = path.read_text(encoding="utf-8-sig", errors="ignore")
+        except OSError:
+            return False
+        return query_lower in text.lower()
+
+    @classmethod
+    def image_matches_caption_filter(
+        cls,
+        image_path: Path,
+        query_lower: str,
+        caption_extension: str,
+        original_extension: str | None,
+        scope: str,
+    ) -> bool:
+        return any(
+            cls.file_contains_caption_filter_query(path, query_lower)
+            for path in cls.caption_filter_paths_for_image(image_path, caption_extension, original_extension, scope)
+        )
+
+    def image_filter_description(self) -> str:
+        parts = [self.image_sort_var.get()]
+        if self.caption_filter_matches is not None and self.caption_filter_active_query:
+            parts.append(f'{self.caption_filter_active_scope} containing "{self.caption_filter_active_query}"')
+        return " and ".join(parts)
+
     def image_has_missing_bboxes(self, image_path: Path) -> bool:
         if self.store is None:
             return False
@@ -1562,6 +1651,8 @@ class CaptionEditorApp(tk.Tk):
             images = [image_path for image_path in images if self.image_has_missing_bboxes(image_path)]
         elif self.image_sort_var.get() == IMAGE_SORT_FAILED:
             images = [image_path for image_path in images if self.image_has_failure_marker(image_path)]
+        if self.caption_filter_matches is not None:
+            images = [image_path for image_path in images if image_path in self.caption_filter_matches]
         return images
 
     def sorted_images(self, images: list[Path]) -> list[Path]:
@@ -1611,6 +1702,7 @@ class CaptionEditorApp(tk.Tk):
         self.save_current()
         self.folder = folder
         self.store = CaptionStore(folder, self.caption_extension_var.get())
+        self.reset_caption_filter_state()
         self.all_images = self.store.images()
         self.images = []
         self.current_index = -1
@@ -1621,9 +1713,151 @@ class CaptionEditorApp(tk.Tk):
             self.clear_loaded_image(f"No images found in {folder}")
             return
         if not self.images:
-            self.clear_loaded_image(f"No images match {self.image_sort_var.get()}.")
+            self.clear_loaded_image(f"No images match {self.image_filter_description()}.")
             return
         self.load_image_at(0, reset_editor_scroll=True)
+
+    def reset_caption_filter_state(self, clear_query: bool = True) -> None:
+        self.caption_filter_generation += 1
+        self.caption_filter_matches = None
+        self.caption_filter_active_query = ""
+        self.caption_filter_active_scope = CAPTION_FILTER_BOTH
+        if clear_query:
+            self.caption_filter_query_var.set("")
+
+    def apply_caption_filter(self) -> None:
+        query = self.caption_filter_query_var.get().strip()
+        if not query:
+            self.clear_caption_filter()
+            return
+        if self.caption_filter_worker is not None and self.caption_filter_worker.is_alive():
+            self.status_var.set("Caption search is already running.")
+            return
+        if self.ai_worker is not None and self.ai_worker.is_alive():
+            self.status_var.set("Wait for the current auto-captioning job to finish before searching captions.")
+            return
+        if self.store is None or self.folder is None:
+            self.status_var.set("Open an image folder before searching captions.")
+            return
+
+        if self.dirty or self.original_dirty:
+            self.save_current()
+
+        scope = self.caption_filter_scope_var.get()
+        if scope not in CAPTION_FILTER_SCOPES:
+            scope = CAPTION_FILTER_BOTH
+            self.caption_filter_scope_var.set(scope)
+        original_extension = self.selected_original_extension()
+        if scope == CAPTION_FILTER_ORIGINAL and original_extension is None:
+            self.status_var.set("Choose an original caption extension before searching original captions.")
+            return
+
+        self.caption_filter_generation += 1
+        generation = self.caption_filter_generation
+        images = list(self.all_images)
+        caption_extension = self.caption_extension_var.get()
+        query_lower = query.lower()
+
+        self.show_ai_progress("Filtering captions", len(images))
+        self.status_var.set(f'Searching {len(images)} image(s) for "{query}"...')
+        self.caption_filter_worker = threading.Thread(
+            target=self.caption_filter_worker_main,
+            args=(generation, images, query, query_lower, caption_extension, original_extension, scope),
+            daemon=True,
+        )
+        self.caption_filter_worker.start()
+        self.after(50, self.poll_caption_filter_queue)
+
+    def clear_caption_filter(self) -> None:
+        was_active = self.caption_filter_matches is not None
+        self.reset_caption_filter_state()
+        selected_paths = self.current_image_selection_paths()
+        self.apply_image_sort(preserve_current=True)
+        self.populate_image_list()
+        if self.images:
+            self.populate_image_selection(selected_paths=selected_paths)
+            self.load_image_at(self.current_index if self.current_index >= 0 else 0, skip_save=True, force_reload=True)
+            self.status_var.set("Caption search cleared." if was_active else "No caption search is active.")
+        else:
+            self.clear_loaded_image(f"No images match {self.image_filter_description()}.")
+
+    def caption_filter_worker_main(
+        self,
+        generation: int,
+        images: list[Path],
+        query: str,
+        query_lower: str,
+        caption_extension: str,
+        original_extension: str | None,
+        scope: str,
+    ) -> None:
+        total = len(images)
+        matches: set[Path] = set()
+        update_every = max(1, total // 100)
+        for index, image_path in enumerate(images, start=1):
+            if self.image_matches_caption_filter(image_path, query_lower, caption_extension, original_extension, scope):
+                matches.add(image_path)
+            if index == total or index % update_every == 0:
+                self.caption_filter_queue.put(
+                    {"type": "progress", "generation": generation, "current": index, "total": total}
+                )
+        self.caption_filter_queue.put(
+            {
+                "type": "done",
+                "generation": generation,
+                "matches": matches,
+                "query": query,
+                "scope": scope,
+                "total": total,
+            }
+        )
+
+    def poll_caption_filter_queue(self) -> None:
+        final_event: dict[str, Any] | None = None
+        while True:
+            try:
+                event = self.caption_filter_queue.get_nowait()
+            except queue.Empty:
+                break
+            if int(event.get("generation", -1)) != self.caption_filter_generation:
+                continue
+            if event.get("type") == "progress":
+                self.update_ai_progress(
+                    "Filtering captions",
+                    int(event.get("current", 0)),
+                    int(event.get("total", 1)),
+                )
+            elif event.get("type") == "done":
+                final_event = event
+
+        if final_event is not None:
+            self.finish_caption_filter(final_event)
+            return
+
+        if self.caption_filter_worker is not None and self.caption_filter_worker.is_alive():
+            self.after(50, self.poll_caption_filter_queue)
+            return
+        self.caption_filter_worker = None
+
+    def finish_caption_filter(self, event: dict[str, Any]) -> None:
+        matches = event.get("matches", set())
+        self.caption_filter_worker = None
+        self.caption_filter_matches = set(matches) if isinstance(matches, set) else set()
+        self.caption_filter_active_query = str(event.get("query", ""))
+        self.caption_filter_active_scope = str(event.get("scope", CAPTION_FILTER_BOTH))
+        selected_paths = self.current_image_selection_paths()
+        self.apply_image_sort(preserve_current=True)
+        self.populate_image_list()
+        total = int(event.get("total", len(self.all_images)))
+        self.update_ai_progress("Filtering captions", total, total)
+        if self.images:
+            self.populate_image_selection(selected_paths=selected_paths)
+            self.load_image_at(self.current_index if self.current_index >= 0 else 0, skip_save=True, force_reload=True)
+            self.status_var.set(
+                f'Showing {len(self.images)}/{total} image(s) matching "{self.caption_filter_active_query}".'
+            )
+        else:
+            self.clear_loaded_image(f"No images match {self.image_filter_description()}.")
 
     def image_list_vertical_scroll(self) -> tuple[float, float] | None:
         try:
@@ -1800,9 +2034,9 @@ class CaptionEditorApp(tk.Tk):
         if self.images:
             self.populate_image_selection(selected_paths=selected_paths)
             self.load_image_at(self.current_index if self.current_index >= 0 else 0, skip_save=True, force_reload=True)
-            self.status_var.set(f"Sorted images by {self.image_sort_var.get()}.")
+            self.status_var.set(f"Showing {len(self.images)} image(s) matching {self.image_filter_description()}.")
         else:
-            self.clear_loaded_image(f"No images match {self.image_sort_var.get()}.")
+            self.clear_loaded_image(f"No images match {self.image_filter_description()}.")
 
     def load_image_at(
         self,
@@ -2405,6 +2639,9 @@ class CaptionEditorApp(tk.Tk):
         if self.ai_worker is not None and self.ai_worker.is_alive():
             self.status_var.set("Auto-captioning is already running.")
             return
+        if self.caption_filter_worker is not None and self.caption_filter_worker.is_alive():
+            self.status_var.set("Wait for the current caption search to finish before auto-captioning.")
+            return
         if self.store is None or self.folder is None:
             self.status_var.set("Open an image folder before auto-captioning.")
             return
@@ -2855,7 +3092,7 @@ class CaptionEditorApp(tk.Tk):
         if 0 <= self.current_index < len(self.images):
             self.load_image_at(self.current_index, preserve_selection=True, skip_save=True, force_reload=True)
         elif not self.images:
-            self.clear_loaded_image(f"{message} No images match {self.image_sort_var.get()}.")
+            self.clear_loaded_image(f"{message} No images match {self.image_filter_description()}.")
             return
         self.status_var.set(message)
 
@@ -2954,6 +3191,11 @@ class CaptionEditorApp(tk.Tk):
         if self.folder is None:
             return
         current_path = self.images[self.current_index] if 0 <= self.current_index < len(self.images) else None
+        if self.caption_filter_matches is not None and self.caption_filter_active_scope in {
+            CAPTION_FILTER_JSON,
+            CAPTION_FILTER_BOTH,
+        }:
+            self.reset_caption_filter_state()
         self.store = CaptionStore(self.folder, self.caption_extension_var.get())
         self.apply_image_sort(preserve_current=True)
         self.populate_image_list()
@@ -2965,7 +3207,7 @@ class CaptionEditorApp(tk.Tk):
             self.current_index = -1
             self.load_image_at(0)
         else:
-            self.clear_loaded_image(f"No images match {self.image_sort_var.get()}.")
+            self.clear_loaded_image(f"No images match {self.image_filter_description()}.")
 
     def on_original_extension_changed(self, _event: tk.Event) -> None:
         try:
@@ -2973,6 +3215,11 @@ class CaptionEditorApp(tk.Tk):
         except OSError as exc:
             messagebox.showerror("Save failed", str(exc))
             return
+        if self.caption_filter_matches is not None and self.caption_filter_active_scope in {
+            CAPTION_FILTER_ORIGINAL,
+            CAPTION_FILTER_BOTH,
+        }:
+            self.reset_caption_filter_state()
         if self.current_index >= 0 and self.current_index < len(self.images):
             self.load_original_text(self.images[self.current_index])
         else:

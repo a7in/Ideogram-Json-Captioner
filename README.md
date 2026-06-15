@@ -25,6 +25,8 @@ Ollama-compatible server.
   auto-captioning job.
 - Sort and filter the image list by name, modified date, missing captions, or
   failed auto-captioning jobs.
+- Search structured JSON captions, original text captions, or both to show only
+  images whose caption sidecars contain a word or phrase.
 - Copy the current image into an `edit` subfolder for later external editing.
 
 ## Install

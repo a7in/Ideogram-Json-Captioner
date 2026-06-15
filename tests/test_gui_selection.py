@@ -1,7 +1,8 @@
+import tempfile
 import unittest
 from pathlib import Path
 
-from ideogram_captioner.gui import CaptionEditorApp
+from ideogram_captioner.gui import CAPTION_FILTER_BOTH, CAPTION_FILTER_JSON, CAPTION_FILTER_ORIGINAL, CaptionEditorApp
 
 
 class FakeListbox:
@@ -138,6 +139,43 @@ class GuiSelectionTests(unittest.TestCase):
         self.assertEqual(app.image_list.activated, 4)
         self.assertEqual(app.image_list.seen, 4)
         self.assertEqual(app.image_list.anchor, 1)
+
+    def test_caption_filter_paths_deduplicates_same_caption_source(self) -> None:
+        image = Path("sample.png")
+
+        self.assertEqual(
+            CaptionEditorApp.caption_filter_paths_for_image(image, ".txt", ".txt", CAPTION_FILTER_BOTH),
+            [Path("sample.txt")],
+        )
+
+    def test_caption_filter_matches_json_or_original_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            image = folder / "sample.png"
+            image.write_bytes(b"x")
+            image.with_suffix(".json").write_text('{"high_level_description":"bright red sign"}', encoding="utf-8")
+            image.with_suffix(".txt").write_text("plain caption with blue paint", encoding="utf-8")
+
+            self.assertTrue(
+                CaptionEditorApp.image_matches_caption_filter(
+                    image, "red sign", ".json", ".txt", CAPTION_FILTER_JSON
+                )
+            )
+            self.assertFalse(
+                CaptionEditorApp.image_matches_caption_filter(
+                    image, "blue paint", ".json", ".txt", CAPTION_FILTER_JSON
+                )
+            )
+            self.assertTrue(
+                CaptionEditorApp.image_matches_caption_filter(
+                    image, "blue paint", ".json", ".txt", CAPTION_FILTER_ORIGINAL
+                )
+            )
+            self.assertTrue(
+                CaptionEditorApp.image_matches_caption_filter(
+                    image, "bright red", ".json", ".txt", CAPTION_FILTER_BOTH
+                )
+            )
 
 
 if __name__ == "__main__":
