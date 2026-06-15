@@ -18,6 +18,11 @@ Ollama-compatible server.
 - Draw, move, resize, delete, and numerically edit bounding boxes.
 - Keep editable original captions, such as `.txt` or `.original`, separate from
   structured JSON output.
+- When no structured caption sidecar exists yet, try to import Ideogram JSON
+  from ComfyUI workflow metadata embedded in the image (EXIF or PNG text
+  chunks). The app scans the longest text-node payloads from the workflow and,
+  if one parses as valid JSON with at least one `obj` bounding box, loads it
+  into the editor; use `Save` to write the sidecar file.
 - Generate text captions, JSON captions from text, JSON captions from images,
   JSON refinements, and bounding boxes with a local or existing
   vision-language model server.
